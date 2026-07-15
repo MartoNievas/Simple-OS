@@ -1,0 +1,11 @@
+*.bin
+*.bin.elf
+*.tsk
+*.tsko
+*.sym
+*.img
+*.d
+*.o
+.gdb_history
+.vscode/
+graphify-out/
