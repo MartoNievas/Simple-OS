@@ -6,6 +6,9 @@
 *.img
 *.d
 *.o
+*.elf
+*.iso
+iso_root/
 .gdb_history
 .vscode/
 graphify-out/

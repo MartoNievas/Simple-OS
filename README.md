@@ -1,37 +1,39 @@
 # mikernel
 
-Kernel monolítico educativo para **x86 (i386, 32 bits)**, arrancado con **Limine** vía **Multiboot2**.
-Escrito en **C (C11, freestanding)** y **NASM**.
+Educational monolithic kernel for **x86 (i386, 32-bit)**, booted with **Limine** via **Multiboot2**.
+Written in **C (C11, freestanding)** and **GAS (AT&T syntax, via i686-elf-gcc)**.
 
-Proyecto personal para poner en práctica AyOC y Sistemas Operativos (Exactas, UBA).
+Personal project to practice AyOC (Computer Architecture and Organization) and Operating Systems, courses at Exactas, UBA (University of Buenos Aires).
 
 ---
 
-## Estado actual
+## Current status
 
-| Fase | Descripción | Estado |
+| Phase | Description | Status |
 |------|-------------|--------|
-| 0 | Toolchain, boot, esqueleto | 🚧 en progreso |
-| 1 | Salida (VGA/serial), panic, parseo Multiboot2 | ⬜ |
-| 2 | GDT, IDT, PIC, PIT, teclado | ⬜ |
-| 3 | PMM, paginación, VMM, heap | ⬜ |
-| 4 | Multitarea, ring 3, syscalls | ⬜ |
+| 0 | Toolchain, boot, skeleton | ✅ done |
+| 1 | Output (VGA/serial), panic, Multiboot2 parsing | ⬜ |
+| 2 | GDT, IDT, PIC, PIT, keyboard | ⬜ |
+| 3 | PMM, paging, VMM, heap | ⬜ |
+| 4 | Multitasking, ring 3, syscalls | ⬜ |
 | 5 | VFS, initrd (tar) | ⬜ |
-| 6 | ELF loader, libc mínima, shell | ⬜ |
+| 6 | ELF loader, minimal libc, shell | ⬜ |
 
 ---
 
-## Requisitos
+## Requirements
 
-Cross-toolchain (no usar el `gcc` del sistema — linkea contra glibc):
+Cross-toolchain (do not use the system `gcc`: it links against glibc):
 
 ```sh
 # Arch Linux (AUR)
 paru -S i686-elf-gcc i686-elf-binutils
-pacman -S nasm qemu-system-x86 xorriso make gdb
+pacman -S qemu-system-x86 xorriso make gdb
 ```
 
-Limine se clona como submódulo (branch binario):
+Limine is added as a git submodule, pinned to `v11.x-binary` (the last binary
+branch available; since v12.x the project ships only release tarballs, with
+no `-binary` branch):
 
 ```sh
 git submodule update --init --recursive
@@ -43,37 +45,37 @@ make -C third_party/limine
 ## Build & run
 
 ```sh
-make            # compila kernel.elf
-make iso        # arma mikernel.iso con Limine + xorriso
-make run        # QEMU con serial en stdio
-make debug      # QEMU con -s -S (esperando GDB en :1234)
-make gdb        # conecta GDB al QEMU de arriba
+make            # builds kernel.elf
+make iso        # builds mikernel.iso with Limine + xorriso
+make run        # QEMU with serial on stdio
+make debug      # QEMU with -s -S (waiting for GDB on :1234)
+make gdb        # connects GDB to the QEMU instance above
 make clean
 ```
 
-Flags de QEMU útiles ya presentes en el Makefile:
-- `-serial stdio` — todo el logging del kernel sale por acá
-- `-d int,cpu_reset -no-reboot -no-shutdown` — para cazar triple faults
+Useful QEMU flags already set in the Makefile:
+- `-serial stdio`: all kernel logging goes through here
+- `-d int,cpu_reset -no-reboot -no-shutdown`: for catching triple faults
 
 ---
 
-## Estructura
+## Structure
 
 ```
 .
 ├── boot/
-│   ├── multiboot2.S      # header Multiboot2 + _start
-│   └── limine.cfg        # config del bootloader
+│   ├── multiboot2.S      # Multiboot2 header + _start + higher-half bootstrap
+│   └── limine.conf       # bootloader config (format >= Limine v5.x)
 ├── kernel/
 │   ├── main.c            # kmain(magic, mb2_info)
-│   ├── mb2.c/.h          # parseo de tags Multiboot2
+│   ├── mb2.c/.h          # Multiboot2 tag parsing
 │   ├── arch/i386/
 │   │   ├── gdt.c, tss.c
 │   │   ├── idt.c, isr.S, irq.S
 │   │   ├── pic.c, pit.c
 │   │   └── switch.S      # context switch
 │   ├── mm/
-│   │   ├── pmm.c         # bitmap de frames de 4 KiB
+│   │   ├── pmm.c         # 4 KiB frame bitmap
 │   │   ├── vmm.c         # page dir/tables, map_page()
 │   │   └── heap.c        # kmalloc/kfree
 │   ├── sched/
@@ -86,79 +88,85 @@ Flags de QEMU útiles ya presentes en el Makefile:
 
 ---
 
-## Decisiones de diseño (no cambiar sin motivo)
+## Design decisions (do not change without a reason)
 
-- **Higher-half kernel**: cargado en `0x100000` físico, mapeado en `0xC0000000` virtual.
-  El linker script usa `AT()` para separar VMA de LMA. Antes de habilitar paginación,
-  todo símbolo se accede restándole `KERNEL_VBASE`.
-- **Multiboot2, no Multiboot1.** El header pide: framebuffer tag, memory map tag,
-  y alineación de módulos a página.
-- **Páginas de 4 KiB**, sin PAE, sin PSE por ahora.
-- **Sin dependencias externas.** Todo lo que necesite el kernel se escribe acá (`kernel/lib/`).
-- **Todo lo que pueda ser C, es C.** ASM solo donde es inevitable: `_start`, stubs de
-  ISR/IRQ, context switch, carga de GDT/IDT/CR3.
-
----
-
-## Convenciones de código
-
-- Estilo: **snake_case**, llaves K&R, indentación 4 espacios.
-- Prefijos por subsistema: `pmm_`, `vmm_`, `sched_`, `vfs_`, `kbd_`.
-- Compilación: `-std=c11 -ffreestanding -Wall -Wextra -Werror -fno-stack-protector -fno-pic -fno-omit-frame-pointer -mno-red-zone -mgeneral-regs-only`
-- Tipos: usar `<stdint.h>` (`uint32_t`, `uintptr_t`). Nunca `int` para direcciones.
-  Distinguir `phys_addr_t` de `virt_addr_t` (typedefs en `include/types.h`) — es la única
-  defensa contra confundirlas.
-- Toda función que pueda fallar devuelve `int` (0 ok, negativo errno-style) o `NULL`.
-- `panic(fmt, ...)` para errores irrecuperables. `KASSERT(cond)` liberalmente.
-- Comentarios y mensajes: **en inglés**. Commits: en inglés, imperativo.
+- **Higher-half kernel**: loaded at `0x100000` physical, mapped at `0xC0000000`
+  virtual. The linker script uses `AT()` to separate VMA from LMA. Before
+  paging is enabled, every symbol is accessed by subtracting `KERNEL_VBASE`.
+- **Multiboot2, not Multiboot1.** The header requests a framebuffer tag, a
+  memory map tag, and page alignment for modules.
+- **4 KiB pages**, no PAE, no PSE for now.
+- **No external dependencies.** Anything the kernel needs gets written here
+  (`kernel/lib/`).
+- **Everything that can be C is C.** Assembly only where unavoidable:
+  `_start`, ISR/IRQ stubs, context switch, loading GDT/IDT/CR3.
 
 ---
 
-## Notas para el agente (Claude Code)
+## Code conventions
 
-- **No inventes valores de hardware.** Constantes de PIC, PIT, VGA, bits de CR0/CR4,
-  formato de PDE/PTE: verificar contra el Intel SDM Vol. 3A o el OSDev Wiki. Si no
-  estás seguro, decilo en vez de adivinar.
-- **Las excepciones con error code y sin error code no son simétricas.** Los stubs
-  deben pushear un dummy error code en las que no lo tienen (0, 1, 2, 3, 4, 5, 6, 7,
-  9, 15, 16, 18, 19, 20) para que el stack frame sea uniforme.
-- **Nunca uses funciones de libc del host.** No hay `stdlib.h`, `stdio.h`, `string.h`
-  del sistema. Solo los headers freestanding: `stdint.h`, `stddef.h`, `stdbool.h`,
-  `stdarg.h`, `limits.h`.
-- **Cuidado con las optimizaciones sobre MMIO**: usar `volatile` para el framebuffer
-  y los registros mapeados.
-- **Cambios de un subsistema por vez.** Cada fase del roadmap debe compilar y bootear
-  antes de pasar a la siguiente. Si algo no bootea, el commit anterior sí lo hacía.
-- **Verificá con `make run` antes de dar algo por terminado.** Si el kernel triplefaultea,
-  `make run` con `-d int` muestra el vector de la excepción original.
-- No agregues dependencias, ni submódulos, ni build systems nuevos (nada de CMake/meson).
+- Style: **snake_case**, K&R braces, 4-space indentation.
+- Prefixes per subsystem: `pmm_`, `vmm_`, `sched_`, `vfs_`, `kbd_`.
+- Compilation: `-std=c11 -ffreestanding -Wall -Wextra -Werror -fno-stack-protector -fno-pic -fno-omit-frame-pointer -mno-red-zone -mgeneral-regs-only`
+- Types: use `<stdint.h>` (`uint32_t`, `uintptr_t`). Never `int` for
+  addresses. Keep `phys_addr_t` separate from `virt_addr_t` (typedefs in
+  `include/types.h`); that's the only real defense against mixing them up.
+- Any function that can fail returns `int` (0 for success, negative
+  errno-style) or `NULL`.
+- `panic(fmt, ...)` for unrecoverable errors. `KASSERT(cond)` liberally.
+- Comments and messages: in English. Commits: in English, imperative.
 
 ---
 
-## Milestones de verificación
+## Notes for the agent (Claude Code)
 
-Cada fase se considera cerrada cuando:
-
-0. Limine bootea el kernel y `_start` hace `hlt` sin panic en QEMU.
-1. El kernel imprime el memory map de Multiboot2 por serial y por pantalla.
-2. `int $0x3` produce un dump de registros legible; el teclado escribe en pantalla.
-3. Un `#PF` en dirección no mapeada se maneja e imprime `CR2` + código de error.
-4. Dos procesos en ring 3 alternan prints vía `write` sobre `int 0x80`.
-5. Se lista y se lee un archivo del initrd tar.
-6. La shell corre desde un ELF de userland.
+- **Don't invent hardware values.** PIC, PIT, VGA constants, CR0/CR4 bits,
+  PDE/PTE layout: verify against the Intel SDM Vol. 3A or the OSDev Wiki. If
+  unsure, say so instead of guessing.
+- **Exceptions with and without an error code aren't symmetric.** Stubs must
+  push a dummy error code for the vectors that don't have one (0, 1, 2, 3, 4,
+  5, 6, 7, 9, 15, 16, 18, 19, 20) so the stack frame stays uniform.
+- **Never use host libc functions.** There's no system `stdlib.h`,
+  `stdio.h`, `string.h`. Only the freestanding headers: `stdint.h`,
+  `stddef.h`, `stdbool.h`, `stdarg.h`, `limits.h`.
+- **Watch out for compiler optimizations around MMIO**: use `volatile` for
+  the framebuffer and any memory-mapped registers.
+- **Change one subsystem at a time.** Each roadmap phase must compile and
+  boot before moving to the next. If something doesn't boot, the previous
+  commit still should.
+- **Verify with `make run` before calling anything done.** If the kernel
+  triple-faults, `make run` with `-d int` shows the original exception
+  vector.
+- Don't add dependencies, submodules, or new build systems (no CMake/meson).
 
 ---
 
-## Referencias
+## Verification milestones
 
-- [OSDev Wiki](https://wiki.osdev.org/) — punto de partida para todo
-- Intel SDM Vol. 3A — modo protegido, paginación, interrupciones
+Each phase is considered closed when:
+
+0. Limine boots the kernel and `_start` does `hlt` with no panic in QEMU.
+1. The kernel prints the Multiboot2 memory map over serial and on screen.
+2. `int $0x3` produces a readable register dump; the keyboard writes to the
+   screen.
+3. A `#PF` at an unmapped address is handled and prints `CR2` plus the error
+   code.
+4. Two ring-3 processes alternate prints via `write` over `int 0x80`.
+5. A file from the initrd tar archive is listed and read.
+6. The shell runs from a userland ELF.
+
+---
+
+## References
+
+- [OSDev Wiki](https://wiki.osdev.org/): starting point for everything
+- Intel SDM Vol. 3A: protected mode, paging, interrupts
 - [Multiboot2 spec](https://www.gnu.org/software/grub/manual/multiboot2/multiboot.html)
 - [Limine Protocol / Boot](https://github.com/limine-bootloader/limine)
 - [8259A PIC datasheet](https://wiki.osdev.org/8259_PIC)
 
 ---
 
-## Licencia
+## License
 
 MIT
