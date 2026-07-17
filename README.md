@@ -12,7 +12,7 @@ Personal project to practice AyOC (Computer Architecture and Organization) and O
 | Phase | Description | Status |
 |------|-------------|--------|
 | 0 | Toolchain, boot, skeleton | ✅ done |
-| 1 | Output (VGA/serial), panic, Multiboot2 parsing | ⬜ |
+| 1 | Output (VGA text mode, serial UART), kprintf/panic, Multiboot2 tag parsing | ✅ done |
 | 2 | GDT, IDT, PIC, PIT, keyboard | ⬜ |
 | 3 | PMM, paging, VMM, heap | ⬜ |
 | 4 | Multitasking, ring 3, syscalls | ⬜ |
@@ -70,6 +70,9 @@ Useful QEMU flags already set in the Makefile:
 │   ├── main.c            # kmain(magic, mb2_info)
 │   ├── mb2.c/.h          # Multiboot2 tag parsing
 │   ├── arch/i386/
+│   │   ├── io.h           # inb/outb port I/O primitives
+│   │   ├── serial.c/.h    # COM1 UART driver
+│   │   ├── vga.c/.h       # VGA text-mode driver
 │   │   ├── gdt.c, tss.c
 │   │   ├── idt.c, isr.S, irq.S
 │   │   ├── pic.c, pit.c
@@ -93,8 +96,17 @@ Useful QEMU flags already set in the Makefile:
 - **Higher-half kernel**: loaded at `0x100000` physical, mapped at `0xC0000000`
   virtual. The linker script uses `AT()` to separate VMA from LMA. Before
   paging is enabled, every symbol is accessed by subtracting `KERNEL_VBASE`.
-- **Multiboot2, not Multiboot1.** The header requests a framebuffer tag, a
-  memory map tag, and page alignment for modules.
+- **The first 4 MiB stay identity-mapped after paging is enabled**, alongside
+  the higher-half mapping. Needed for now to reach low physical memory
+  directly (VGA buffer, the Multiboot2 info struct, wherever Limine put it).
+  Goes away once a real VMM exists in phase 3.
+- **Multiboot2, not Multiboot1.** The header requests a framebuffer tag and
+  page alignment for modules. The memory map tag shows up in the boot info
+  regardless: bootloaders provide it without needing an explicit request tag.
+- **`textmode: yes` in `limine.conf`.** The framebuffer tag in the header lets
+  Limine switch to a graphical linear framebuffer instead of legacy VGA text
+  mode. `textmode: yes` (BIOS only) keeps it on EGA text, which the VGA
+  driver assumes.
 - **4 KiB pages**, no PAE, no PSE for now.
 - **No external dependencies.** Anything the kernel needs gets written here
   (`kernel/lib/`).
@@ -113,7 +125,9 @@ Useful QEMU flags already set in the Makefile:
   `include/types.h`); that's the only real defense against mixing them up.
 - Any function that can fail returns `int` (0 for success, negative
   errno-style) or `NULL`.
-- `panic(fmt, ...)` for unrecoverable errors. `KASSERT(cond)` liberally.
+- `panic(fmt, ...)` for unrecoverable errors: it's a macro that captures
+  `__FILE__`/`__LINE__` automatically, so call `panic()`, never `panic_impl()`
+  directly. `KASSERT(cond)` liberally.
 - Comments and messages: in English. Commits: in English, imperative.
 
 ---
